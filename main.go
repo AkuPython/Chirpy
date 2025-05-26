@@ -15,13 +15,15 @@ import (
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
-	dbQueries *database.Queries
+	db *database.Queries
+	platform string
 }
 
 
 func main()  {
 	godotenv.Load(".env")
 	dbURL := os.Getenv("DB_URL")
+	platform := os.Getenv("PLATFORM")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Fatal("DB open failed! ", err)
@@ -31,7 +33,7 @@ func main()  {
 	const port = "8080"
 	const rootPath = "."
 	
-	apiCfg := apiConfig{dbQueries: dbQueries}
+	apiCfg := apiConfig{db: dbQueries, platform: platform}
 
 
 	mux := http.NewServeMux()
@@ -42,6 +44,7 @@ func main()  {
 	
 	mux.HandleFunc("GET /admin/metrics", apiCfg.handlerGetMetrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.handlerResetMetrics)
+	mux.HandleFunc("POST /api/users", apiCfg.handlerAddUser)
 
 
 	srv := &http.Server{

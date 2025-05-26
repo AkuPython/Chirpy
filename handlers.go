@@ -1,11 +1,55 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
+
+	"github.com/AkuPython/Chirpy/internal/database"
+	"github.com/google/uuid"
 )
+
+type errorParameters struct {
+	Body string `json:"error"`
+}
+
+
+func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfg.fileserverHits.Add(1)
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (cfg *apiConfig) handlerGetMetrics(w http.ResponseWriter, r *http.Request) {
+	hits_html := fmt.Sprintf(`<html>
+  <body>
+    <h1>Welcome, Chirpy Admin</h1>
+    <p>Chirpy has been visited %d times!</p>
+  </body>
+</html>`, cfg.fileserverHits.Load())
+	w.Header().Add("Content-Type", "text/html")
+	w.WriteHeader(200)
+	w.Write([]byte(hits_html))
+}
+
+func (cfg *apiConfig) handlerResetMetrics(w http.ResponseWriter, r *http.Request) { 
+	if cfg.platform != "dev" {
+		w.WriteHeader(403)
+		return
+	}
+
+	cfg.fileserverHits.Store(0)
+
+	cfg.db.DeleteUsers(r.Context())
+	w.Header().Add("Content-Type", "text/plain; charset=utf-8")	
+
+	w.WriteHeader(200)
+	w.Write([]byte(fmt.Sprintf("Hits reset! Hits: %d\nUsers Deleted!", cfg.fileserverHits.Load())))
+}
 
 func handlerChirp(w http.ResponseWriter, r *http.Request) {
 	type chirpParameters struct {
@@ -16,9 +60,6 @@ func handlerChirp(w http.ResponseWriter, r *http.Request) {
 		Body string `json:"cleaned_body"`
 	}
 	
-	type errorParameters struct {
-		Body string `json:"error"`
-	}
 	
 	type successParameters struct {
 		Body bool `json:"valid"`
@@ -75,32 +116,50 @@ func handlerReadiness(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("OK"))
 }
 
+func (cfg *apiConfig) handlerAddUser(w http.ResponseWriter, r *http.Request) {
+	type userCreateParameters struct {
+		Body string `json:"email"`
+	}
+	type userParameters struct {
+		Id uuid.UUID `json:"id"`
+		Created time.Time `json:"created_at"`
+		Updated time.Time `json:"updated_at"`
+		Email string `json:"email"`
+	}
 
-func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		cfg.fileserverHits.Add(1)
-		next.ServeHTTP(w, r)
-	})
+	decoder := json.NewDecoder(r.Body)
+	email := userCreateParameters{}
+	err := decoder.Decode(&email)
+
+	var resp any
+	var user database.User
+	
+	if err == nil {
+		email := sql.NullString{String: email.Body, Valid: true}
+		user, err = cfg.db.CreateUser(r.Context(), email)
+		if err != nil {
+			fmt.Println("here")
+		}
+	}
+
+	if err != nil {
+		w.WriteHeader(400)
+		resp = errorParameters{Body: fmt.Sprintf("Something went wrong: %s", err)}
+	} else {
+		w.WriteHeader(201)
+		resp = userParameters{
+			Id: user.ID,
+			Created: user.CreatedAt.Time,
+			Updated: user.UpdatedAt.Time,
+			Email: user.Email.String,
+		}
+	}
+
+	w.Header().Add("Content-Type", "application/json")	
+	dat, err := json.Marshal(resp)
+	if err != nil {
+		w.WriteHeader(500)
+		return
+	}
+	w.Write(dat)
 }
-
-func (cfg *apiConfig) handlerGetMetrics(w http.ResponseWriter, r *http.Request) {
-	hits_html := fmt.Sprintf(`<html>
-  <body>
-    <h1>Welcome, Chirpy Admin</h1>
-    <p>Chirpy has been visited %d times!</p>
-  </body>
-</html>`, cfg.fileserverHits.Load())
-	w.Header().Add("Content-Type", "text/html")
-	w.WriteHeader(200)
-	w.Write([]byte(hits_html))
-}
-
-func (cfg *apiConfig) handlerResetMetrics(w http.ResponseWriter, r *http.Request) { 
-	cfg.fileserverHits.Store(0)
-
-	w.Header().Add("Content-Type", "text/plain; charset=utf-8")	
-
-	w.WriteHeader(200)
-	w.Write([]byte(fmt.Sprintf("Hits reset! Hits: %d", cfg.fileserverHits.Load())))
-}
-
