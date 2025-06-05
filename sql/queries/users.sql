@@ -9,9 +9,8 @@ RETURNING id, created_at, updated_at, email;
 SELECT * FROM users
 WHERE email = $1;
 
--- name: UpdateUser :one
+-- name: UpdateOneUser :exec
 UPDATE users
 SET updated_at = NOW(),
     hashed_password = $2
-WHERE id = $1
-RETURNING id, updated_at, email;
+WHERE id = $1;

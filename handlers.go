@@ -357,3 +357,66 @@ func (cfg *apiConfig) handlerAddUser(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write(dat)
 }
+
+func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) {
+
+	decoder := json.NewDecoder(r.Body)
+	user := userCreateParameters{}
+	err := decoder.Decode(&user)
+	if err != nil {
+		writeJSON(w, 400, errorParameters{Body: "Invalid Body"})
+		return
+	}
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		writeJSON(w, 401, errorParameters{Body: "No Auth Header in request"})
+		return
+	}
+	token_user, err := auth.ValidateJWT(token, cfg.jwt_secret)
+	
+	if err != nil {
+		writeJSON(w, 401, errorParameters{Body: "Invalid or expired token"})
+		return
+	}
+	// check_user, err := cfg.db.GetUserByEmail(r.Context(), user.Email)
+	// fmt.Println(check_user.ID, "==", token_user)
+	// if token_user != check_user.ID {
+	// 	writeJSON(w, 403, errorParameters{Body: "Invalid email!"})
+	// 	return
+	// }
+
+	var resp any
+	
+	if err == nil {
+		password, err := auth.HashPassword(user.Password)
+		if err != nil {
+			writeJSON(w, 500, errorParameters{Body: "PW Hash fail!"})
+			return
+		}
+		userParam := database.UpdateOneUserParams{ID: token_user, HashedPassword: password}
+		err = cfg.db.UpdateOneUser(r.Context(), userParam)
+	}
+
+	if err != nil {
+		w.WriteHeader(400)
+		resp = errorParameters{Body: fmt.Sprintf("Something went wrong: %s", err)}
+	} else {
+		check_user, _ := cfg.db.GetUserByEmail(r.Context(), user.Email)
+		w.WriteHeader(200)
+		resp = userParameters{
+			Id: check_user.ID,
+			Created: check_user.CreatedAt,
+			Updated: check_user.UpdatedAt,
+			Email: "walter@breakingbad.com",
+		}
+	}
+
+	w.Header().Add("Content-Type", "application/json")	
+	dat, err := json.Marshal(resp)
+	if err != nil {
+		w.WriteHeader(500)
+		return
+	}
+	w.Write(dat)
+}
