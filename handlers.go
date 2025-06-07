@@ -39,6 +39,12 @@ type tokenParameters struct {
 	Body string `json:"token"`
 }
 
+type polkaParameters struct {
+	Event string `json:"event"`
+	Data  struct {
+		UserID string `json:"user_id"`
+	} `json:"data"`
+}
 
 type userParameters struct {
 	Id uuid.UUID `json:"id"`
@@ -452,4 +458,35 @@ func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.Write(dat)
+}
+
+func (cfg *apiConfig) handlerPolkaWebhook(w http.ResponseWriter, r *http.Request) {
+
+	decoder := json.NewDecoder(r.Body)
+	polka := polkaParameters{}
+	err := decoder.Decode(&polka)
+	if err != nil {
+		writeJSON(w, 400, errorParameters{Body: "Invalid Body"})
+		return
+	}
+
+	if polka.Event != "user.upgraded" {
+		w.WriteHeader(204)
+		return
+	}
+
+	userUUID, err := uuid.Parse(polka.Data.UserID)
+	if err != nil {
+		w.Header().Add("Content-Type", "application/json")	
+		writeJSON(w, 400, errorParameters{Body: "Could not parse user UUID"})
+		return
+	}
+
+
+	_, err = cfg.db.UpdateUserRed(r.Context(), userUUID)
+	if err != nil {
+		w.WriteHeader(404)
+		return
+	}
+	w.WriteHeader(204)
 }
