@@ -470,6 +470,11 @@ func (cfg *apiConfig) handlerPolkaWebhook(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if key, err := auth.GetAPIKey(r.Header); err != nil || cfg.polka_key != key {
+		w.WriteHeader(401)
+		return
+	}
+
 	if polka.Event != "user.upgraded" {
 		w.WriteHeader(204)
 		return
@@ -488,5 +493,6 @@ func (cfg *apiConfig) handlerPolkaWebhook(w http.ResponseWriter, r *http.Request
 		w.WriteHeader(404)
 		return
 	}
+
 	w.WriteHeader(204)
 }
