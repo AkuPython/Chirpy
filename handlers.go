@@ -45,8 +45,9 @@ type userParameters struct {
 	Created time.Time `json:"created_at"`
 	Updated time.Time `json:"updated_at"`
 	Email string `json:"email"`
-	Token string `json:"token"`
-	RefreshToken string `json:"refresh_token"`
+	Token string `json:"token,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	IsRed bool `json:"is_chirpy_red"`
 }
 
 type Chirp struct {
@@ -67,6 +68,17 @@ func convertDbChirp (dbChirp database.Chirp) Chirp {
 		UserId: dbChirp.UserID,
 	}
 	return jsonChirp
+}
+
+func convertDbUser (userDB database.User) userParameters {
+	user := userParameters{
+		Id: userDB.ID,
+		Created: userDB.CreatedAt,
+		Updated: userDB.UpdatedAt,
+		Email: userDB.Email,
+		IsRed: userDB.IsChirpyRed,
+	}
+	return user
 }
 
 func writeJSON(w http.ResponseWriter, c int, resp any) {
@@ -188,13 +200,11 @@ func (cfg *apiConfig) handlerLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, 200, userParameters{
-		Id: userDB.ID,
-		Created: userDB.CreatedAt,
-		Updated: userDB.UpdatedAt,
-		Email: userDB.Email,
-		Token: token,
-		RefreshToken: refresh_token})
+	returnParams := convertDbUser(userDB)
+	returnParams.Token = token
+	returnParams.RefreshToken = refresh_token
+
+	writeJSON(w, 200, returnParams)
 
 }
 func (cfg *apiConfig) handlerRefresh(w http.ResponseWriter, r *http.Request) {
@@ -309,6 +319,41 @@ func (cfg *apiConfig) handlerAddChirps(w http.ResponseWriter, r *http.Request) {
 
 }
 
+func (cfg *apiConfig) handlerDeleteChirps(w http.ResponseWriter, r *http.Request) {
+
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		writeJSON(w, 401, errorParameters{Body: "No Auth Header in request"})
+		return
+	}
+	
+	token_user, err := auth.ValidateJWT(token, cfg.jwt_secret)
+	// _, err = auth.ValidateJWT(token, cfg.jwt_secret)
+	
+	if err != nil {
+		writeJSON(w, 403, errorParameters{Body: "Invalid or expired token"})
+		return
+	}
+
+	chirpId := r.PathValue("chirpId")
+	chirpUUID, err := uuid.Parse(chirpId)
+	if err != nil {
+		writeJSON(w, 400, errorParameters{Body: fmt.Sprintf("Error Converting chirpId to UUID: %v\nErr: %v", chirpId, err)})
+		return
+	}
+	chirp, err := cfg.db.ChirpGet(r.Context(), chirpUUID)
+	if err != nil {
+		writeJSON(w, 404, errorParameters{Body: fmt.Sprintf("Error Getting ChirpID: %v\nErr: %v", chirpId, err)})
+		return
+	}
+	if chirp.UserID != token_user {
+		writeJSON(w, 403, errorParameters{Body: "Wrong user for delete!"})
+		return
+
+	}
+	cfg.db.ChirpDelete(r.Context(), chirpUUID)
+	w.WriteHeader(204)
+}
 
 func handlerReadiness(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "text/plain; charset=utf-8")	
@@ -317,6 +362,7 @@ func handlerReadiness(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handlerAddUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-Type", "application/json")	
 
 	decoder := json.NewDecoder(r.Body)
 	user := userCreateParameters{}
@@ -346,10 +392,10 @@ func (cfg *apiConfig) handlerAddUser(w http.ResponseWriter, r *http.Request) {
 			Created: newUser.CreatedAt,
 			Updated: newUser.UpdatedAt,
 			Email: newUser.Email,
+			IsRed: newUser.IsChirpyRed,
 		}
 	}
 
-	w.Header().Add("Content-Type", "application/json")	
 	dat, err := json.Marshal(resp)
 	if err != nil {
 		w.WriteHeader(500)
@@ -359,6 +405,7 @@ func (cfg *apiConfig) handlerAddUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) {
+	w.Header().Add("Content-Type", "application/json")	
 
 	decoder := json.NewDecoder(r.Body)
 	user := userCreateParameters{}
@@ -379,40 +426,26 @@ func (cfg *apiConfig) handlerUpdateUser(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, 401, errorParameters{Body: "Invalid or expired token"})
 		return
 	}
-	// check_user, err := cfg.db.GetUserByEmail(r.Context(), user.Email)
-	// fmt.Println(check_user.ID, "==", token_user)
-	// if token_user != check_user.ID {
-	// 	writeJSON(w, 403, errorParameters{Body: "Invalid email!"})
-	// 	return
-	// }
 
 	var resp any
 	
-	if err == nil {
-		password, err := auth.HashPassword(user.Password)
-		if err != nil {
-			writeJSON(w, 500, errorParameters{Body: "PW Hash fail!"})
-			return
-		}
-		userParam := database.UpdateOneUserParams{ID: token_user, HashedPassword: password}
-		err = cfg.db.UpdateOneUser(r.Context(), userParam)
-	}
+	var updatedUser database.User
 
+	password, err := auth.HashPassword(user.Password)
 	if err != nil {
-		w.WriteHeader(400)
-		resp = errorParameters{Body: fmt.Sprintf("Something went wrong: %s", err)}
-	} else {
-		check_user, _ := cfg.db.GetUserByEmail(r.Context(), user.Email)
-		w.WriteHeader(200)
-		resp = userParameters{
-			Id: check_user.ID,
-			Created: check_user.CreatedAt,
-			Updated: check_user.UpdatedAt,
-			Email: "walter@breakingbad.com",
-		}
+		writeJSON(w, 500, errorParameters{Body: "PW Hash fail!"})
+		return
 	}
+	updateParams := database.UpdateOneUserParams{ID: token_user, Email: user.Email, HashedPassword: password}
+	updatedUser, err = cfg.db.UpdateOneUser(r.Context(), updateParams)
+	if err != nil {
+		writeJSON(w, 500, errorParameters{Body: "DB Update failed!"})
+		return
+	}
+	
+	w.WriteHeader(200)
+	resp = convertDbUser(updatedUser)
 
-	w.Header().Add("Content-Type", "application/json")	
 	dat, err := json.Marshal(resp)
 	if err != nil {
 		w.WriteHeader(500)

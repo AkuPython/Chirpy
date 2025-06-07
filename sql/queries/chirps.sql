@@ -12,3 +12,7 @@ WHERE id = $1 LIMIT 1;
 -- name: ChirpsGet :many
 SELECT * FROM chirps
 ORDER BY created_at ASC;
+
+-- name: ChirpDelete :exec
+DELETE FROM chirps
+WHERE id = $1;
