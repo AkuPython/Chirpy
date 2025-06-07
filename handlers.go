@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -149,7 +150,10 @@ func (cfg *apiConfig) handlerGetChirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
-	chirps, err := cfg.db.ChirpsGet(r.Context())
+	userUUID, _ := uuid.Parse(r.URL.Query().Get("author_id"))
+	sort_opt := r.URL.Query().Get("sort")
+	
+	chirps, err := cfg.db.ChirpsGet(r.Context(), userUUID)
 	if err != nil {
 		writeJSON(w, 400, errorParameters{Body: fmt.Sprintf("Error Getting Chirps: %v", err)})
 		return
@@ -158,6 +162,11 @@ func (cfg *apiConfig) handlerGetChirps(w http.ResponseWriter, r *http.Request) {
 	for _, chirp := range chirps {
 		jsonChirps = append(jsonChirps, convertDbChirp(chirp))
 	}
+
+	if sort_opt == "desc" {
+		sort.Slice(jsonChirps, func(i, j int) bool { return chirps[i].CreatedAt.After(chirps[j].CreatedAt) })
+	}
+	
 	writeJSON(w, 200, jsonChirps)
 }
 

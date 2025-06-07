@@ -67,11 +67,12 @@ func (q *Queries) ChirpGet(ctx context.Context, id uuid.UUID) (Chirp, error) {
 
 const chirpsGet = `-- name: ChirpsGet :many
 SELECT id, created_at, updated_at, body, user_id FROM chirps
+WHERE (COALESCE($1::uuid, '00000000-0000-0000-0000-000000000000') = '00000000-0000-0000-0000-000000000000' OR user_id = $1)
 ORDER BY created_at ASC
 `
 
-func (q *Queries) ChirpsGet(ctx context.Context) ([]Chirp, error) {
-	rows, err := q.db.QueryContext(ctx, chirpsGet)
+func (q *Queries) ChirpsGet(ctx context.Context, dollar_1 uuid.UUID) ([]Chirp, error) {
+	rows, err := q.db.QueryContext(ctx, chirpsGet, dollar_1)
 	if err != nil {
 		return nil, err
 	}
